@@ -1,0 +1,7 @@
+{
+  "name": "LegalOps Job Navigator",
+  "description": "A daily workflow dashboard for Legal Technology and Operations job seekers. It uses AI-powered search to curate the latest listings from LinkedIn, Indeed, CLOC, and BuiltInSF, filtering out attorney roles to focus exclusively on tech and ops.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
