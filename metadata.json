@@ -1,7 +1,5 @@
 {
-  "name": "LegalOps Job Navigator",
-  "description": "A daily workflow dashboard for Legal Technology and Operations job seekers. It uses AI-powered search to curate the latest listings from LinkedIn, Indeed, CLOC, and BuiltInSF, filtering out attorney roles to focus exclusively on tech and ops.",
-  "requestFramePermissions": [
-    "geolocation"
-  ]
+  "name": "Legal AI Vendor Tracker",
+  "description": "A tool for legal ops and legal tech teams to track AI vendor profiles, auto-refresh vendor intelligence via Gemini AI, and manage relationship activity including demos, contacts, integrations, and data sources.",
+  "requestFramePermissions": []
 }
