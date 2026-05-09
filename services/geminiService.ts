@@ -1,19 +1,21 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import { JobListing, SearchConfig } from "../types";
+import { AIIntelligence, GroundingSource } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
-export const fetchLegalOpsJobs = async (config: SearchConfig): Promise<{ jobs: JobListing[], sources: any[] }> => {
+export const fetchVendorIntelligence = async (
+  vendorName: string,
+  website: string
+): Promise<{ intelligence: Partial<AIIntelligence>; sources: GroundingSource[] }> => {
   const prompt = `
-    Find the most recent job postings for "${config.keywords.join(' ')}" in the following locations: ${config.locations.join(', ')}.
-    Search specifically on ${config.sources.join(', ')}.
-    IMPORTANT FILTERS:
-    1. EXCLUDE any job titles containing: ${config.excludedKeywords.join(', ')}.
-    2. Focus ONLY on Legal Operations, Legal Technology, Legal Project Management, and Legal Systems roles.
-    3. Look for recent postings from the last 7 days.
-    
-    Return the results as a list of jobs including: Title, Company, Location, a 2-sentence summary, the source URL, and whether it is remote.
+    Search for the latest information about "${vendorName}" (${website}), a legal AI software vendor.
+
+    Find and return:
+    1. Their most recent product release or major update (with version number and date if available). If no specific version exists, describe the latest notable release or announcement.
+    2. The AI/ML models they currently use or have announced (e.g. GPT-4o, Claude, proprietary models). Return an empty array if unknown.
+    3. Up to 5 recently announced features or capabilities (from the last 12 months). Each feature should be a short descriptive sentence.
+
+    Focus on official press releases, their blog, and legal tech news sources such as Law.com, LegalTech News, Above the Law, and CLOC.
   `;
 
   try {
@@ -26,46 +28,40 @@ export const fetchLegalOpsJobs = async (config: SearchConfig): Promise<{ jobs: J
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            jobs: {
+            latestRelease: { type: Type.STRING },
+            aiModels: {
               type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  company: { type: Type.STRING },
-                  location: { type: Type.STRING },
-                  summary: { type: Type.STRING },
-                  url: { type: Type.STRING },
-                  isRemote: { type: Type.BOOLEAN },
-                  postedDate: { type: Type.STRING }
-                },
-                required: ["title", "company", "location", "summary", "url"]
-              }
-            }
-          }
-        }
+              items: { type: Type.STRING },
+            },
+            recentFeatures: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+          },
+          required: ["latestRelease", "aiModels", "recentFeatures"],
+        },
       },
     });
 
-    const result = JSON.parse(response.text || '{"jobs": []}');
-    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    
-    // Map to ensure IDs and consistency
-    const formattedJobs = (result.jobs || []).map((j: any, index: number) => ({
-      ...j,
-      id: `job-${index}-${Date.now()}`,
-      source: j.url.includes('linkedin') ? 'LinkedIn' : 
-              j.url.includes('indeed') ? 'Indeed' : 
-              j.url.includes('cloc') ? 'CLOC' : 
-              j.url.includes('builtin') ? 'BuiltInSF' : 'Direct'
-    }));
+    const result = JSON.parse(response.text || '{"latestRelease":"","aiModels":[],"recentFeatures":[]}');
+    const rawChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const groundingChunks: GroundingSource[] = rawChunks
+      .filter((c: any) => c.web?.uri)
+      .map((c: any) => ({ web: { uri: c.web.uri as string, title: (c.web.title as string) || '' } }));
 
-    return { 
-      jobs: formattedJobs, 
-      sources: groundingChunks 
+    return {
+      intelligence: {
+        latestRelease: result.latestRelease || '',
+        aiModels: result.aiModels || [],
+        recentFeatures: result.recentFeatures || [],
+      },
+      sources: groundingChunks,
     };
   } catch (error) {
-    console.error("Error fetching jobs from Gemini:", error);
-    return { jobs: [], sources: [] };
+    console.error("Error fetching vendor intelligence from Gemini:", error);
+    return {
+      intelligence: { latestRelease: '', aiModels: [], recentFeatures: [] },
+      sources: [],
+    };
   }
 };

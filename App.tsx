@@ -1,175 +1,219 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import Header from './components/Header';
-import JobCard from './components/JobCard';
-import SettingsPanel from './components/SettingsPanel';
-import { JobListing, SearchConfig } from './types';
-import { fetchLegalOpsJobs } from './services/geminiService';
+import VendorCard from './components/VendorCard';
+import VendorDetail from './components/VendorDetail';
+import AddVendorModal from './components/AddVendorModal';
+import EmptyState from './components/EmptyState';
+import { Vendor, AppFilters, VendorCategory, ALL_CATEGORIES } from './types';
+import { fetchVendorIntelligence } from './services/geminiService';
+import { SEED_VENDORS } from './utils/seedData';
+
+const STORAGE_KEY = 'legalai_vendors';
 
 const App: React.FC = () => {
-  const [jobs, setJobs] = useState<JobListing[]>([]);
-  const [sources, setSources] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  
-  const [config, setConfig] = useState<SearchConfig>({
-    keywords: ['Legal Operations', 'Legal Technology', 'Legal Project Manager', 'Legal Systems'],
-    locations: ['SF Bay Area', 'Remote'],
-    excludedKeywords: ['Counsel', 'Attorney', 'Lawyer', 'Associate'],
-    sources: ['LinkedIn', 'Indeed', 'CLOC', 'BuiltInSF']
-  });
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<AppFilters>({ searchQuery: '', selectedCategory: 'All' });
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
+  const [refreshingVendorId, setRefreshingVendorId] = useState<string | null>(null);
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
 
-  const refreshFeed = useCallback(async () => {
-    setIsLoading(true);
-    const result = await fetchLegalOpsJobs(config);
-    setJobs(result.jobs);
-    setSources(result.sources);
-    setLastUpdated(new Date().toLocaleTimeString());
-    setIsLoading(false);
-  }, [config]);
-
+  // Load from localStorage on mount; seed if empty
   useEffect(() => {
-    refreshFeed();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      try {
+        setVendors(JSON.parse(stored));
+      } catch {
+        setVendors(SEED_VENDORS);
+      }
+    } else {
+      setVendors(SEED_VENDORS);
+    }
   }, []);
 
-  const handleCopyEmail = () => {
-    const jobListText = jobs.map(j => `
-      ${j.title} at ${j.company} (${j.location})
-      ${j.summary}
-      View: ${j.url}
-    `).join('\n---\n');
-    
-    const emailBody = `Daily LegalOps Job Feed - ${new Date().toLocaleDateString()}\n\nHere are your curated jobs:\n\n${jobListText}`;
-    
-    navigator.clipboard.writeText(emailBody);
-    alert('Email draft copied to clipboard!');
+  // Persist whenever vendors change
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(vendors));
+  }, [vendors]);
+
+  // Derived
+  const selectedVendor = vendors.find(v => v.id === selectedVendorId) ?? null;
+
+  const filteredVendors = vendors.filter(v => {
+    const matchesSearch = v.name.toLowerCase().includes(filters.searchQuery.toLowerCase());
+    const matchesCategory =
+      filters.selectedCategory === 'All' || v.categories.includes(filters.selectedCategory as VendorCategory);
+    return matchesSearch && matchesCategory;
+  });
+
+  // Handlers
+  const handleSaveVendor = useCallback((vendor: Vendor) => {
+    setVendors(prev => {
+      const exists = prev.some(v => v.id === vendor.id);
+      return exists ? prev.map(v => v.id === vendor.id ? vendor : v) : [...prev, vendor];
+    });
+    setSelectedVendorId(vendor.id);
+    if (window.innerWidth < 1024) setMobileView('detail');
+  }, []);
+
+  const handleDeleteVendor = useCallback((id: string) => {
+    setVendors(prev => prev.filter(v => v.id !== id));
+    setSelectedVendorId(null);
+    if (window.innerWidth < 1024) setMobileView('list');
+  }, []);
+
+  const handleRefreshIntelligence = useCallback(async (vendorId: string) => {
+    const vendor = vendors.find(v => v.id === vendorId);
+    if (!vendor) return;
+    setRefreshingVendorId(vendorId);
+    const { intelligence, sources } = await fetchVendorIntelligence(vendor.name, vendor.website);
+    const now = new Date().toISOString();
+    setVendors(prev => prev.map(v =>
+      v.id === vendorId
+        ? { ...v, intelligence: { ...v.intelligence, ...intelligence, lastFetched: now, sources }, updatedAt: now }
+        : v
+    ));
+    setRefreshingVendorId(null);
+  }, [vendors]);
+
+  const openAddModal = () => {
+    setEditingVendor(null);
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (vendor: Vendor) => {
+    setEditingVendor(vendor);
+    setIsModalOpen(true);
+  };
+
+  const handleSelectVendor = (id: string) => {
+    setSelectedVendorId(id);
+    if (window.innerWidth < 1024) setMobileView('detail');
+  };
+
+  const handleModalSave = async (vendor: Vendor) => {
+    handleSaveVendor(vendor);
+    // Auto-fetch intelligence for newly created vendors that have a name
+    if (!editingVendor && vendor.name) {
+      setTimeout(() => handleRefreshIntelligence(vendor.id), 300);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-12">
-      <Header />
-      
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex flex-col lg:flex-row gap-8">
-          
-          {/* Main Feed */}
-          <div className="flex-1 space-y-6">
-            <div className="bg-white rounded-xl border border-slate-200 p-6 flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-900">Today's Curated Feed</h2>
-                <p className="text-slate-500 text-sm mt-1">
-                  {isLoading ? 'Scanning reputable sources...' : `Found ${jobs.length} relevant positions for your profile.`}
-                </p>
-              </div>
-              <div className="text-right">
-                <span className="block text-xs font-bold text-slate-400 uppercase tracking-widest">Last Synced</span>
-                <span className="text-sm text-slate-600 font-medium">{lastUpdated || 'Never'}</span>
-              </div>
-            </div>
+    <div className="h-screen flex flex-col bg-slate-50 overflow-hidden">
+      <Header
+        searchQuery={filters.searchQuery}
+        onSearchChange={q => setFilters(f => ({ ...f, searchQuery: q }))}
+        onAddVendor={openAddModal}
+        vendorCount={vendors.length}
+      />
 
-            {isLoading ? (
-              <div className="grid gap-6">
-                {[1, 2, 3].map(n => (
-                  <div key={n} className="bg-white rounded-xl border border-slate-200 p-8 animate-pulse">
-                    <div className="h-4 bg-slate-100 rounded w-3/4 mb-4"></div>
-                    <div className="h-3 bg-slate-100 rounded w-1/2 mb-8"></div>
-                    <div className="h-3 bg-slate-100 rounded w-full mb-2"></div>
-                    <div className="h-3 bg-slate-100 rounded w-full mb-2"></div>
-                    <div className="h-3 bg-slate-100 rounded w-2/3"></div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="grid gap-6">
-                {jobs.length > 0 ? (
-                  jobs.map(job => (
-                    <JobCard key={job.id} job={job} />
-                  ))
-                ) : (
-                  <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
-                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <i className="fas fa-search text-slate-300 text-2xl"></i>
-                    </div>
-                    <h3 className="text-lg font-bold text-slate-900">No new matches today</h3>
-                    <p className="text-slate-500 mt-1 max-w-sm mx-auto text-sm">
-                      We couldn't find any fresh postings that meet your specific filters. Try widening your location or check back tomorrow.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {sources.length > 0 && (
-              <div className="mt-8 bg-slate-50 border border-slate-200 rounded-xl p-4">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 px-2">Data Sources & Grounding</h4>
-                <div className="flex flex-wrap gap-4 px-2">
-                  {sources.slice(0, 5).map((s, idx) => (
-                    <a 
-                      key={idx} 
-                      href={s.web?.uri} 
-                      target="_blank" 
-                      rel="noopener"
-                      className="text-[11px] text-slate-500 hover:text-indigo-600 truncate max-w-[200px]"
-                    >
-                      <i className="fas fa-link mr-1"></i>
-                      {s.web?.title || 'External Source'}
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Sidebar */}
-          <div className="w-full lg:w-80 space-y-6">
-            <SettingsPanel 
-              config={config} 
-              onChange={setConfig} 
-              onRefresh={refreshFeed}
-              isLoading={isLoading}
-            />
-
-            <div className="bg-indigo-900 rounded-xl p-6 text-white shadow-xl shadow-indigo-900/20">
-              <h3 className="font-bold text-lg mb-2">Email Workflow</h3>
-              <p className="text-indigo-200 text-xs mb-4 leading-relaxed">
-                Your daily feed is ready. Click below to copy a pre-formatted email draft of today's best matches.
-              </p>
-              <button 
-                onClick={handleCopyEmail}
-                className="w-full bg-white text-indigo-900 font-bold py-2.5 rounded-lg text-sm hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2"
-              >
-                <i className="fas fa-envelope"></i>
-                Draft Daily Email
-              </button>
-              
-              <div className="mt-6 pt-6 border-t border-indigo-800 space-y-4">
-                <div className="flex items-center gap-3 text-xs text-indigo-300">
-                  <div className="w-6 h-6 rounded-full bg-indigo-800 flex items-center justify-center">
-                    <i className="fas fa-check text-[10px]"></i>
-                  </div>
-                  SF Bay Area / Remote only
-                </div>
-                <div className="flex items-center gap-3 text-xs text-indigo-300">
-                  <div className="w-6 h-6 rounded-full bg-indigo-800 flex items-center justify-center">
-                    <i className="fas fa-check text-[10px]"></i>
-                  </div>
-                  Strict non-attorney filtering
-                </div>
-              </div>
-            </div>
-          </div>
-          
+      {/* Category Filter Bar */}
+      <div className="bg-white border-b border-slate-100 flex-shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-1 px-4 py-2 min-w-max">
+          {(['All', ...ALL_CATEGORIES] as const).map(cat => (
+            <button
+              key={cat}
+              onClick={() => setFilters(f => ({ ...f, selectedCategory: cat as AppFilters['selectedCategory'] }))}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                filters.selectedCategory === cat
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
         </div>
-      </main>
+      </div>
 
-      {/* Floating Action for Mobile */}
-      <button 
-        onClick={refreshFeed}
-        className="lg:hidden fixed bottom-6 right-6 bg-indigo-600 text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center text-xl z-50 active:scale-90 transition-transform"
-      >
-        <i className={`fas ${isLoading ? 'fa-spinner fa-spin' : 'fa-sync-alt'}`}></i>
-      </button>
+      {/* Main Layout */}
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* Left Panel — Vendor List */}
+        <div className={`w-80 flex-shrink-0 border-r border-slate-200 bg-white flex flex-col overflow-hidden ${
+          mobileView === 'detail' ? 'hidden lg:flex' : 'flex'
+        }`}>
+          <div className="px-4 py-3 border-b border-slate-50 flex-shrink-0">
+            <p className="text-xs text-slate-400 font-medium">
+              {filteredVendors.length} of {vendors.length} vendor{vendors.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {vendors.length === 0 ? (
+              <EmptyState
+                icon="fa-solid fa-building"
+                title="No vendors yet"
+                message="Add your first legal AI vendor to start tracking."
+                actionLabel="Add Vendor"
+                onAction={openAddModal}
+              />
+            ) : filteredVendors.length === 0 ? (
+              <EmptyState
+                icon="fa-solid fa-magnifying-glass"
+                title="No results"
+                message="No vendors match your current search or filter."
+              />
+            ) : (
+              filteredVendors.map(vendor => (
+                <VendorCard
+                  key={vendor.id}
+                  vendor={vendor}
+                  isSelected={vendor.id === selectedVendorId}
+                  onSelect={handleSelectVendor}
+                />
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Right Panel — Vendor Detail */}
+        <div className={`flex-1 overflow-hidden flex flex-col ${
+          mobileView === 'list' ? 'hidden lg:flex' : 'flex'
+        }`}>
+          {/* Mobile back button */}
+          <div className="lg:hidden flex-shrink-0 px-4 pt-3">
+            <button
+              onClick={() => setMobileView('list')}
+              className="inline-flex items-center gap-1.5 text-sm text-indigo-600 font-medium"
+            >
+              <i className="fa-solid fa-arrow-left text-xs" />
+              All Vendors
+            </button>
+          </div>
+
+          {selectedVendor ? (
+            <div className="flex-1 overflow-y-auto">
+              <VendorDetail
+                vendor={selectedVendor}
+                onUpdate={handleSaveVendor}
+                onDelete={handleDeleteVendor}
+                isRefreshing={refreshingVendorId === selectedVendor.id}
+                onRefreshIntelligence={handleRefreshIntelligence}
+                onEdit={openEditModal}
+              />
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <EmptyState
+                icon="fa-solid fa-arrow-left"
+                title="Select a vendor"
+                message="Choose a vendor from the list to view and manage its profile."
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <AddVendorModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSave={handleModalSave}
+        existingVendor={editingVendor}
+      />
     </div>
   );
 };
