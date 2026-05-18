@@ -1,10 +1,10 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { AIIntelligence, GroundingSource } from "../types";
 
 export const fetchVendorIntelligence = async (
   vendorName: string,
   website: string
 ): Promise<{ intelligence: Partial<AIIntelligence>; sources: GroundingSource[] }> => {
+  const { GoogleGenAI, Type } = await import("@google/genai");
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   const prompt = `
     Search for the latest information about "${vendorName}" (${website}), a legal AI software vendor.
