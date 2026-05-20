@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Legal AI Vendor Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    html, body { margin: 0; padding: 0; height: 100%; font-family: 'Inter', sans-serif; background: #f8fafc; }
+    #app { display: flex; flex-direction: column; height: 100vh; }
+    .panel-scroll { overflow-y: auto; flex: 1; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .vendor-card.selected { border-left: 4px solid #4f46e5; background: #eef2ff; }
+    .tab-btn.active { border-bottom: 2px solid #4f46e5; color: #4f46e5; font-weight: 600; }
+    .tab-btn { border-bottom: 2px solid transparent; color: #64748b; padding: 10px 16px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+    .tab-btn:hover { color: #334155; }
+    .cat-pill { padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; border: none; }
+    .cat-pill.active { background: #4f46e5; color: white; }
+    .cat-pill:not(.active) { background: #f1f5f9; color: #475569; }
+    .cat-pill:not(.active):hover { background: #e2e8f0; }
+    input, textarea, select { outline: none; }
+    input:focus, textarea:focus, select:focus { ring: 2px solid #4f46e5; }
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 500; }
+    .spinner { animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); z-index: 50; display: flex; align-items: center; justify-content: center; }
+    .modal-box { background: white; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); width: 100%; max-width: 520px; margin: 16px; display: flex; flex-direction: column; max-height: 90vh; }
+    .form-input { width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; font-size: 14px; color: #1e293b; font-family: 'Inter', sans-serif; }
+    .form-input:focus { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.15); }
+    .btn-primary { background: #4f46e5; color: white; border: none; border-radius: 8px; padding: 8px 18px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: 'Inter', sans-serif; }
+    .btn-primary:hover { background: #4338ca; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-ghost { background: none; border: none; color: #64748b; cursor: pointer; padding: 6px; border-radius: 6px; font-family: 'Inter', sans-serif; }
+    .btn-ghost:hover { background: #f1f5f9; color: #334155; }
+    .tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; }
+    .freshness-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  </style>
+</head>
+<body>
+<div id="app">Loading...</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════════════════════
+const CATEGORIES = ['Contracting','Research','Workflow','eDiscovery','Productivity','Document Management','Training'];
+const ACTIVITY_TYPES = ['Demo','Call','Meeting','Email'];
+const CAT_COLORS = {
+  'Contracting':'bg-blue-100 text-blue-800','Research':'bg-green-100 text-green-800',
+  'Workflow':'bg-yellow-100 text-yellow-800','eDiscovery':'bg-purple-100 text-purple-800',
+  'Productivity':'bg-orange-100 text-orange-800','Document Management':'bg-teal-100 text-teal-800',
+  'Training':'bg-pink-100 text-pink-800'
+};
+const ACTIVITY_ICONS = { Demo:'fa-desktop', Call:'fa-phone', Meeting:'fa-users', Email:'fa-envelope' };
+const ACTIVITY_COLORS = { Demo:'#e0e7ff:#4f46e5', Call:'#dcfce7:#16a34a', Meeting:'#dbeafe:#2563eb', Email:'#ffedd5:#ea580c' };
+const STORAGE_KEY = 'legalai_vendors_v2';
+const APIKEY_KEY = 'legalai_gemini_key';
+
+// ══════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════
+let S = {
+  vendors: [],
+  selectedId: null,
+  searchQuery: '',
+  selectedCat: 'All',
+  activeTab: 'intelligence',
+  modalOpen: false,
+  modalVendor: null,
+  settingsOpen: false,
+  refreshingId: null,
+  apiKey: '',
+  confirmDeleteId: null,
+  showContactForm: false,
+  editingContactId: null,
+  showActivityForm: false,
+};
+
+// ══════════════════════════════════════════════════════
+// SEED DATA
+// ══════════════════════════════════════════════════════
+const SEED = [
+  { id:'seed-1', name:'Harvey AI', website:'https://www.harvey.ai',
+    description:'AI platform for legal professionals specializing in research, drafting, and contract analysis for law firms and corporate legal departments.',
+    categories:['Research','Contracting','Workflow'],
+    dataSources:['Case law','Statutes','Regulations','Internal documents'],
+    integrations:['Microsoft Word','Outlook','iManage','NetDocuments'],
+    contacts:[{id:'c1',name:'Winston Peters',title:'Enterprise Account Executive',email:'wpeters@harvey.ai',phone:'+1 415-555-0101',linkedIn:'',notes:'Primary sales contact. Very responsive via email.'}],
+    activities:[{id:'a1',type:'Demo',date:'2026-03-15',summary:'Product demo covering contract analysis and legal research workflows.',attendees:['Sarah Chen (Legal Ops)','Winston Peters (Harvey)'],notes:'Impressive contract redlining speed. Need to evaluate data security controls.'}],
+    intelligence:{latestRelease:'',aiModels:[],recentFeatures:[],lastFetched:null,sources:[]},
+    createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() },
+  { id:'seed-2', name:'Ironclad', website:'https://www.ironcladapp.com',
+    description:'Digital contracting platform that streamlines the entire contract lifecycle from creation and negotiation to execution and management.',
+    categories:['Contracting','Workflow','Document Management'],
+    dataSources:['Contract repositories','CRM data','ERP data'],
+    integrations:['Salesforce','Workday','DocuSign','Adobe Sign','Slack','Google Drive'],
+    contacts:[{id:'c2',name:'Jamie Rodriguez',title:'Solutions Engineer',email:'jrodriguez@ironcladapp.com',phone:'+1 628-555-0204',linkedIn:'',notes:'Technical contact for integration questions.'}],
+    activities:[{id:'a2',type:'Call',date:'2026-04-02',summary:'Discovery call to understand current contract workflow and pain points.',attendees:['Dorothy Wilson (Legal Ops)','Jamie Rodriguez (Ironclad)'],notes:'Discussed Salesforce integration and approval workflow automation.'}],
+    intelligence:{latestRelease:'',aiModels:[],recentFeatures:[],lastFetched:null,sources:[]},
+    createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() },
+  { id:'seed-3', name:'Relativity', website:'https://www.relativity.com',
+    description:'Leading e-discovery and legal operations platform used by law firms, corporations, and government agencies for document review and compliance.',
+    categories:['eDiscovery','Document Management','Workflow'],
+    dataSources:['Email archives','Cloud storage','Enterprise repositories','Mobile data'],
+    integrations:['Microsoft 365','Slack','Google Workspace','Nuix'],
+    contacts:[],
+    activities:[{id:'a3',type:'Meeting',date:'2026-01-20',summary:'Annual business review and roadmap discussion.',attendees:['Dorothy Wilson (Legal Ops)','Tom Baker (IT)','Relativity CSM team'],notes:'CSM shared 2026 roadmap including new AI-assisted review features.'}],
+    intelligence:{latestRelease:'',aiModels:[],recentFeatures:[],lastFetched:null,sources:[]},
+    createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() },
+];
+
+// ══════════════════════════════════════════════════════
+// PERSISTENCE
+// ══════════════════════════════════════════════════════
+function loadData() {
+  try { S.vendors = JSON.parse(localStorage.getItem(STORAGE_KEY)) || SEED; }
+  catch { S.vendors = SEED; }
+  if (!S.vendors.length) S.vendors = SEED;
+  S.apiKey = localStorage.getItem(APIKEY_KEY) || '';
+}
+function saveVendors() { localStorage.setItem(STORAGE_KEY, JSON.stringify(S.vendors)); }
+
+// ══════════════════════════════════════════════════════
+// HELPERS
+// ══════════════════════════════════════════════════════
+function uid() { return 'v' + Date.now() + Math.random().toString(36).slice(2); }
+function nowISO() { return new Date().toISOString(); }
+function getSelected() { return S.vendors.find(v => v.id === S.selectedId) || null; }
+function getFiltered() {
+  const q = S.searchQuery.toLowerCase();
+  return S.vendors.filter(v => {
+    const ms = !q || v.name.toLowerCase().includes(q) || (v.description||'').toLowerCase().includes(q);
+    const mc = S.selectedCat === 'All' || v.categories.includes(S.selectedCat);
+    return ms && mc;
+  });
+}
+function domainOf(url) { try { return new URL(url).hostname.replace(/^www\./,''); } catch { return url||''; } }
+function freshnessInfo(lastFetched) {
+  if (!lastFetched) return { color:'#94a3b8', label:'Never fetched', stale:true };
+  const days = (Date.now() - new Date(lastFetched).getTime()) / 86400000;
+  return days <= 30
+    ? { color:'#22c55e', label:'Up to date', stale:false }
+    : { color:'#f59e0b', label:'May be stale', stale:true };
+}
+function lastActivityDate(v) {
+  if (!v.activities?.length) return null;
+  return [...v.activities].sort((a,b)=>b.date.localeCompare(a.date))[0].date;
+}
+function fmtDate(ds) {
+  if (!ds) return '';
+  try { return new Date(ds.length===10 ? ds+'T00:00:00' : ds).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); }
+  catch { return ds; }
+}
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function catBadge(cat, small) {
+  const cls = CAT_COLORS[cat] || 'bg-slate-100 text-slate-600';
+  const sz = small ? 'style="font-size:10px;padding:2px 6px;"' : '';
+  return `<span class="badge ${cls}" ${sz}>${esc(cat)}</span>`;
+}
+
+// ══════════════════════════════════════════════════════
+// GEMINI AI
+// ══════════════════════════════════════════════════════
+async function refreshIntelligence(vendorId) {
+  const vendor = S.vendors.find(v => v.id === vendorId);
+  if (!vendor) return;
+  if (!S.apiKey) {
+    alert('Please add your Gemini API key first.\n\nClick the ⚙ Settings icon in the top-right corner to add it.');
+    return;
+  }
+  S.refreshingId = vendorId;
+  render();
+
+  const prompt = `You are a legal tech analyst. Search for the latest information about "${vendor.name}" (website: ${vendor.website||'unknown'}), a legal AI vendor. Return ONLY a JSON object with exactly these fields:
+- latestRelease: string describing their most recent product release, version, or major update announcement with approximate date
+- aiModels: array of strings listing AI/ML model names they use or have announced (e.g. "GPT-4o", "Claude 3", "proprietary LLM")
+- recentFeatures: array of up to 5 strings, each a short sentence describing a recently announced feature or capability
+If information is unavailable for a field, use an empty string or empty array. Return valid JSON only.`;
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${S.apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role:'user', parts:[{ text: prompt }] }],
+          tools: [{ google_search: {} }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      }
+    );
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    let result = {};
+    try { result = JSON.parse(text); } catch {
+      const m = text.match(/\{[\s\S]*\}/);
+      if (m) try { result = JSON.parse(m[0]); } catch {}
+    }
+    S.vendors = S.vendors.map(v => v.id === vendorId ? {
+      ...v,
+      intelligence: {
+        latestRelease: result.latestRelease || '',
+        aiModels: Array.isArray(result.aiModels) ? result.aiModels : [],
+        recentFeatures: Array.isArray(result.recentFeatures) ? result.recentFeatures : [],
+        lastFetched: nowISO(),
+        sources: []
+      },
+      updatedAt: nowISO()
+    } : v);
+    saveVendors();
+  } catch(err) {
+    alert('AI refresh failed: ' + err.message + '\n\nCheck that your Gemini API key is correct in Settings.');
+  }
+  S.refreshingId = null;
+  render();
+}
+
+// ══════════════════════════════════════════════════════
+// HTML BUILDERS
+// ══════════════════════════════════════════════════════
+function buildApp() {
+  const vendor = getSelected();
+  return `
+  <!-- HEADER -->
+  <header style="background:white;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:12px;padding:0 16px;height:60px;flex-shrink:0;">
+    <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+      <div style="background:#4f46e5;border-radius:10px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">
+        <i class="fa-solid fa-scale-balanced" style="color:white;font-size:15px;"></i>
+      </div>
+      <div style="line-height:1.2;">
+        <div style="font-weight:700;font-size:15px;color:#1e293b;">Legal AI</div>
+        <div style="font-size:11px;color:#4f46e5;font-weight:500;">Vendor Tracker</div>
+      </div>
+    </div>
+    <div style="flex:1;max-width:400px;position:relative;margin:0 8px;">
+      <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:13px;"></i>
+      <input id="search-input" type="text" placeholder="Search ${S.vendors.length} vendors..."
+        value="${esc(S.searchQuery)}"
+        class="form-input" style="padding-left:32px;padding-right:32px;"
+        oninput="S.searchQuery=this.value;renderList()">
+      ${S.searchQuery ? `<button onclick="S.searchQuery='';document.getElementById('search-input').value='';renderList();" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);border:none;background:none;cursor:pointer;color:#94a3b8;font-size:13px;">✕</button>` : ''}
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0;">
+      <button class="btn-ghost" onclick="S.settingsOpen=true;render();" title="Settings" style="font-size:15px;">
+        <i class="fa-solid fa-gear"></i>
+      </button>
+      <button class="btn-primary" onclick="openModal(null);" style="display:flex;align-items:center;gap:6px;">
+        <i class="fa-solid fa-plus" style="font-size:11px;"></i> Add Vendor
+      </button>
+    </div>
+  </header>
+
+  <!-- CATEGORY BAR -->
+  <div style="background:white;border-bottom:1px solid #e2e8f0;overflow-x:auto;flex-shrink:0;">
+    <div style="display:flex;gap:6px;padding:8px 16px;min-width:max-content;">
+      ${['All',...CATEGORIES].map(cat=>`
+        <button class="cat-pill ${S.selectedCat===cat?'active':''}" onclick="S.selectedCat='${cat}';renderList();">${cat}</button>
+      `).join('')}
+    </div>
+  </div>
+
+  <!-- MAIN PANELS -->
+  <div style="display:flex;flex:1;overflow:hidden;">
+
+    <!-- LEFT: VENDOR LIST -->
+    <div id="vendor-list-panel" style="width:300px;flex-shrink:0;border-right:1px solid #e2e8f0;background:white;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="padding:8px 12px;border-bottom:1px solid #f1f5f9;flex-shrink:0;">
+        <span id="vendor-count-label" style="font-size:12px;color:#94a3b8;font-weight:500;"></span>
+      </div>
+      <div id="vendor-list" class="panel-scroll"></div>
+    </div>
+
+    <!-- RIGHT: DETAIL PANEL -->
+    <div id="detail-panel" style="flex:1;display:flex;flex-direction:column;overflow:hidden;background:#f8fafc;">
+      ${vendor ? buildDetail(vendor) : buildNoSelection()}
+    </div>
+  </div>
+
+  <!-- MODALS -->
+  ${S.modalOpen ? buildVendorModal() : ''}
+  ${S.settingsOpen ? buildSettingsModal() : ''}
+  `;
+}
+
+function buildVendorList() {
+  const list = getFiltered();
+  const label = document.getElementById('vendor-count-label');
+  if (label) label.textContent = `${list.length} of ${S.vendors.length} vendor${S.vendors.length!==1?'s':''}`;
+
+  if (!S.vendors.length) return `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:32px;text-align:center;color:#94a3b8;">
+      <i class="fa-solid fa-building" style="font-size:36px;margin-bottom:16px;"></i>
+      <p style="font-weight:600;color:#64748b;margin:0 0 8px;">No vendors yet</p>
+      <p style="font-size:13px;margin:0 0 16px;">Add your first legal AI vendor to start tracking.</p>
+      <button class="btn-primary" onclick="openModal(null);">Add Vendor</button>
+    </div>`;
+  if (!list.length) return `
+    <div style="padding:32px;text-align:center;color:#94a3b8;">
+      <i class="fa-solid fa-magnifying-glass" style="font-size:28px;margin-bottom:12px;display:block;"></i>
+      <p style="font-size:14px;">No vendors match your search.</p>
+    </div>`;
+
+  return list.map(v => {
+    const sel = v.id === S.selectedId;
+    const {color} = freshnessInfo(v.intelligence?.lastFetched);
+    const lastAct = lastActivityDate(v);
+    const visibleCats = (v.categories||[]).slice(0,2);
+    const extra = (v.categories||[]).length - 2;
+    return `
+    <div class="vendor-card ${sel?'selected':''}" onclick="selectVendor('${v.id}');"
+      style="padding:14px 16px;border-bottom:1px solid #f1f5f9;cursor:pointer;transition:background 0.1s;${sel?'':'border-left:4px solid transparent;'}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px;">
+        <span style="font-weight:600;font-size:14px;color:${sel?'#3730a3':'#1e293b'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(v.name)}</span>
+        <span class="freshness-dot" style="background:${color};flex-shrink:0;margin-top:5px;" title="${freshnessInfo(v.intelligence?.lastFetched).label}"></span>
+      </div>
+      ${v.website ? `<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(domainOf(v.website))}</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">
+        ${visibleCats.map(c=>catBadge(c,true)).join('')}
+        ${extra>0?`<span style="font-size:11px;color:#94a3b8;align-self:center;">+${extra} more</span>`:''}
+      </div>
+      ${lastAct ? `<div style="font-size:11px;color:#94a3b8;"><i class="fa-regular fa-calendar" style="margin-right:3px;"></i>${fmtDate(lastAct)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function buildDetail(v) {
+  const isRefreshing = S.refreshingId === v.id;
+  return `
+  <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+    <!-- Vendor Header -->
+    <div style="background:white;padding:20px 24px 16px;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+        <div style="flex:1;min-width:0;">
+          <h2 style="margin:0 0 4px;font-size:20px;font-weight:700;color:#1e293b;">${esc(v.name)}</h2>
+          ${v.website?`<a href="${esc(v.website)}" target="_blank" style="font-size:12px;color:#6366f1;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
+            <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px;"></i>${esc(domainOf(v.website))}</a>`:''}
+          ${v.description?`<p style="margin:8px 0 0;font-size:13px;color:#475569;line-height:1.6;">${esc(v.description)}</p>`:''}
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0;">
+          <button class="btn-ghost" onclick="openModal('${v.id}');" title="Edit vendor"><i class="fa-solid fa-pen" style="font-size:13px;"></i></button>
+          ${S.confirmDeleteId===v.id
+            ? `<span style="display:flex;align-items:center;gap:4px;font-size:13px;color:#dc2626;font-weight:500;">
+                Delete?
+                <button class="btn-primary" style="background:#dc2626;padding:4px 10px;font-size:12px;" onclick="deleteVendor('${v.id}');">Yes</button>
+                <button class="btn-ghost" onclick="S.confirmDeleteId=null;render();" style="font-size:12px;padding:4px 8px;">No</button>
+              </span>`
+            : `<button class="btn-ghost" onclick="S.confirmDeleteId='${v.id}';render();" title="Delete" style="color:#94a3b8;"><i class="fa-solid fa-trash" style="font-size:13px;"></i></button>`}
+        </div>
+      </div>
+      ${(v.categories||[]).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${(v.categories||[]).map(c=>catBadge(c,false)).join('')}</div>` : ''}
+      ${(v.dataSources||[]).length || (v.integrations||[]).length ? `
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">
+        ${(v.dataSources||[]).length?`<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;"><span style="font-size:11px;color:#94a3b8;font-weight:500;margin-right:2px;">Data:</span>${(v.dataSources||[]).map(d=>`<span class="tag" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;">${esc(d)}</span>`).join('')}</div>`:'' }
+        ${(v.integrations||[]).length?`<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;"><span style="font-size:11px;color:#94a3b8;font-weight:500;margin-right:2px;">Integrates:</span>${(v.integrations||[]).map(i=>`<span class="tag" style="background:#faf5ff;color:#7e22ce;border:1px solid #e9d5ff;">${esc(i)}</span>`).join('')}</div>`:'' }
+      </div>`:'' }
+    </div>
+    <!-- Tab Bar -->
+    <div style="background:white;border-bottom:1px solid #e2e8f0;display:flex;flex-shrink:0;padding:0 24px;">
+      ${['intelligence','contacts','activities'].map(t=>`
+        <button class="tab-btn ${S.activeTab===t?'active':''}" onclick="switchTab('${t}');">
+          <i class="fa-solid ${t==='intelligence'?'fa-wand-magic-sparkles':t==='contacts'?'fa-address-book':'fa-calendar-days'}" style="font-size:12px;"></i>
+          ${t.charAt(0).toUpperCase()+t.slice(1)}
+          ${t==='contacts'&&(v.contacts||[]).length?`<span style="background:#f1f5f9;color:#64748b;font-size:11px;padding:1px 6px;border-radius:9999px;">${(v.contacts||[]).length}</span>`:''}
+          ${t==='activities'&&(v.activities||[]).length?`<span style="background:#f1f5f9;color:#64748b;font-size:11px;padding:1px 6px;border-radius:9999px;">${(v.activities||[]).length}</span>`:''}
+        </button>`).join('')}
+    </div>
+    <!-- Tab Content -->
+    <div class="panel-scroll" style="padding:20px 24px;">
+      ${S.activeTab==='intelligence' ? buildIntelTab(v, isRefreshing) : ''}
+      ${S.activeTab==='contacts' ? buildContactsTab(v) : ''}
+      ${S.activeTab==='activities' ? buildActivitiesTab(v) : ''}
+    </div>
+  </div>`;
+}
+
+function buildNoSelection() {
+  return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#94a3b8;text-align:center;padding:32px;">
+    <i class="fa-solid fa-arrow-left" style="font-size:32px;margin-bottom:16px;"></i>
+    <p style="font-weight:600;color:#64748b;font-size:16px;margin:0 0 8px;">Select a vendor</p>
+    <p style="font-size:14px;margin:0;">Choose a vendor from the list to view and manage its profile.</p>
+  </div>`;
+}
+
+function buildIntelTab(v, isRefreshing) {
+  const intel = v.intelligence || {};
+  const {color,label,stale} = freshnessInfo(intel.lastFetched);
+  const hasData = intel.latestRelease || (intel.aiModels||[]).length || (intel.recentFeatures||[]).length;
+  return `
+  <div style="display:flex;flex-direction:column;gap:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;border-radius:9999px;background:${stale?'#fffbeb':'#f0fdf4'};color:${stale?'#92400e':'#166534'};border:1px solid ${stale?'#fde68a':'#bbf7d0'};">
+          <i class="fa-solid ${stale?'fa-circle-exclamation':'fa-circle-check'}" style="font-size:11px;"></i>${label}
+        </span>
+        ${intel.lastFetched?`<span style="font-size:12px;color:#94a3b8;">Last updated ${fmtDate(intel.lastFetched)}</span>`:''}
+      </div>
+      <button class="btn-primary" onclick="refreshIntelligence('${v.id}');" ${isRefreshing?'disabled':''} style="display:flex;align-items:center;gap:6px;font-size:13px;padding:7px 14px;">
+        ${isRefreshing
+          ? `<i class="fa-solid fa-circle-notch spinner"></i> Fetching...`
+          : `<i class="fa-solid fa-wand-magic-sparkles"></i> Refresh with AI`}
+      </button>
+    </div>
+    ${isRefreshing ? `<div style="text-align:center;padding:40px;color:#6366f1;"><i class="fa-solid fa-circle-notch spinner" style="font-size:32px;margin-bottom:12px;display:block;"></i><p style="margin:0;font-weight:500;">Searching the web for ${esc(v.name)}...</p><p style="margin:4px 0 0;font-size:13px;color:#94a3b8;">This may take a few seconds.</p></div>` : ''}
+    ${!hasData && !isRefreshing ? `<div style="text-align:center;padding:40px;color:#94a3b8;"><i class="fa-solid fa-robot" style="font-size:32px;margin-bottom:12px;display:block;"></i><p style="margin:0;font-size:14px;">No AI intelligence data yet.</p><p style="margin:6px 0 0;font-size:13px;">Click "Refresh with AI" to auto-fetch the latest info for ${esc(v.name)}.<br>${!S.apiKey?'<strong style="color:#f59e0b;">You\'ll need to add your Gemini API key in Settings (⚙) first.</strong>':''}</p></div>` : ''}
+    ${hasData && !isRefreshing ? `
+      ${intel.latestRelease?`<div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:16px;">
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          <i class="fa-solid fa-rocket" style="color:#6366f1;margin-top:2px;flex-shrink:0;"></i>
+          <div><p style="font-size:11px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:.05em;margin:0 0 4px;">Latest Release</p><p style="font-size:14px;color:#1e293b;margin:0;">${esc(intel.latestRelease)}</p></div>
+        </div>
+      </div>`:''}
+      ${(intel.aiModels||[]).length?`<div><p style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px;">AI Models</p><div style="display:flex;flex-wrap:wrap;gap:8px;">${(intel.aiModels||[]).map(m=>`<span style="background:#f1f5f9;color:#1e293b;font-size:13px;font-weight:500;padding:4px 12px;border-radius:9999px;">${esc(m)}</span>`).join('')}</div></div>`:''}
+      ${(intel.recentFeatures||[]).length?`<div><p style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px;">Recent Features</p><ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px;">${(intel.recentFeatures||[]).map(f=>`<li style="display:flex;align-items:flex-start;gap:8px;font-size:14px;color:#334155;"><i class="fa-solid fa-circle-check" style="color:#22c55e;margin-top:2px;flex-shrink:0;"></i>${esc(f)}</li>`).join('')}</ul></div>`:''}
+    ` : ''}
+  </div>`;
+}
+
+function buildContactsTab(v) {
+  const contacts = v.contacts || [];
+  const editing = S.editingContactId ? contacts.find(c=>c.id===S.editingContactId) : null;
+  return `
+  <div style="display:flex;flex-direction:column;gap:12px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-size:13px;color:#64748b;">${contacts.length} contact${contacts.length!==1?'s':''}</span>
+      ${!S.showContactForm?`<button onclick="S.showContactForm=true;S.editingContactId=null;render();" style="background:none;border:none;color:#4f46e5;font-size:13px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:4px;font-family:'Inter',sans-serif;">
+        <i class="fa-solid fa-plus" style="font-size:11px;"></i> Add Contact</button>`:''}
+    </div>
+    ${S.showContactForm ? buildContactForm(editing, v.id) : ''}
+    ${!contacts.length && !S.showContactForm ? `<div style="text-align:center;padding:32px;color:#94a3b8;"><i class="fa-solid fa-address-book" style="font-size:28px;margin-bottom:8px;display:block;"></i><p style="font-size:14px;margin:0;">No contacts added yet.</p></div>` : ''}
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      ${contacts.map(c=>`
+      <div style="background:white;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;display:flex;align-items:flex-start;gap:12px;">
+        <div style="width:36px;height:36px;border-radius:50%;background:#e0e7ff;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <span style="font-size:14px;font-weight:700;color:#6366f1;">${esc(c.name.charAt(0).toUpperCase())}</span>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <p style="margin:0 0 2px;font-weight:600;font-size:14px;color:#1e293b;">${esc(c.name)}</p>
+          ${c.title?`<p style="margin:0 0 6px;font-size:12px;color:#64748b;">${esc(c.title)}</p>`:''}
+          <div style="display:flex;flex-wrap:wrap;gap:10px;">
+            ${c.email?`<a href="mailto:${esc(c.email)}" style="font-size:12px;color:#6366f1;text-decoration:none;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-envelope"></i>${esc(c.email)}</a>`:''}
+            ${c.phone?`<a href="tel:${esc(c.phone)}" style="font-size:12px;color:#475569;text-decoration:none;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-phone"></i>${esc(c.phone)}</a>`:''}
+            ${c.linkedIn?`<a href="${esc(c.linkedIn)}" target="_blank" style="font-size:12px;color:#0077b5;text-decoration:none;display:flex;align-items:center;gap:4px;"><i class="fa-brands fa-linkedin"></i>LinkedIn</a>`:''}
+          </div>
+          ${c.notes?`<p style="margin:6px 0 0;font-size:12px;color:#94a3b8;font-style:italic;">${esc(c.notes)}</p>`:''}
+        </div>
+        <div style="display:flex;gap:2px;flex-shrink:0;">
+          <button class="btn-ghost" onclick="S.editingContactId='${c.id}';S.showContactForm=true;render();" style="font-size:12px;" title="Edit"><i class="fa-solid fa-pen"></i></button>
+          <button class="btn-ghost" onclick="deleteContact('${v.id}','${c.id}');" style="font-size:12px;color:#94a3b8;" title="Delete"><i class="fa-solid fa-trash"></i></button>
+        </div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function buildContactForm(existing, vendorId) {
+  return `
+  <form id="contact-form" onsubmit="saveContact(event,'${vendorId}','${existing?existing.id:''}');" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;">
+    <p style="font-weight:600;font-size:14px;color:#334155;margin:0 0 12px;">${existing?'Edit':'New'} Contact</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Name *</label>
+        <input class="form-input" name="name" required placeholder="Full name" value="${esc(existing?.name||'')}"></div>
+      <div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Title</label>
+        <input class="form-input" name="title" placeholder="Job title" value="${esc(existing?.title||'')}"></div>
+      <div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Email</label>
+        <input class="form-input" name="email" type="email" placeholder="email@company.com" value="${esc(existing?.email||'')}"></div>
+      <div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Phone</label>
+        <input class="form-input" name="phone" placeholder="+1 555-000-0000" value="${esc(existing?.phone||'')}"></div>
+      <div style="grid-column:span 2;"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">LinkedIn URL</label>
+        <input class="form-input" name="linkedIn" type="url" placeholder="https://linkedin.com/in/..." value="${esc(existing?.linkedIn||'')}"></div>
+      <div style="grid-column:span 2;"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Notes</label>
+        <textarea class="form-input" name="notes" rows="2" placeholder="Notes about this contact..." style="resize:none;">${esc(existing?.notes||'')}</textarea></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+      <button type="button" onclick="S.showContactForm=false;S.editingContactId=null;render();" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:13px;font-family:'Inter',sans-serif;">Cancel</button>
+      <button type="submit" class="btn-primary" style="font-size:13px;padding:7px 16px;">Save</button>
+    </div>
+  </form>`;
+}
+
+function buildActivitiesTab(v) {
+  const activities = [...(v.activities||[])].sort((a,b)=>b.date.localeCompare(a.date));
+  return `
+  <div style="display:flex;flex-direction:column;gap:12px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-size:13px;color:#64748b;">${activities.length} activit${activities.length!==1?'ies':'y'}</span>
+      ${!S.showActivityForm?`<button onclick="S.showActivityForm=true;render();" style="background:none;border:none;color:#4f46e5;font-size:13px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:4px;font-family:'Inter',sans-serif;">
+        <i class="fa-solid fa-plus" style="font-size:11px;"></i> Log Activity</button>`:''}
+    </div>
+    ${S.showActivityForm ? buildActivityForm(v.id) : ''}
+    ${!activities.length && !S.showActivityForm ? `<div style="text-align:center;padding:32px;color:#94a3b8;"><i class="fa-solid fa-calendar-days" style="font-size:28px;margin-bottom:8px;display:block;"></i><p style="font-size:14px;margin:0;">No activities logged yet.</p></div>` : ''}
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      ${activities.map(a=>{
+        const [bg,fg] = (ACTIVITY_COLORS[a.type]||'#f1f5f9:#475569').split(':');
+        return `
+        <div style="display:flex;gap:10px;">
+          <div style="width:32px;height:32px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px;">
+            <i class="fa-solid ${ACTIVITY_ICONS[a.type]||'fa-calendar'}" style="color:${fg};font-size:12px;"></i>
+          </div>
+          <div style="flex:1;background:white;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:12px;font-weight:700;color:#334155;">${esc(a.type)}</span>
+                <span style="font-size:11px;color:#94a3b8;">${fmtDate(a.date)}</span>
+              </div>
+              <button class="btn-ghost" onclick="deleteActivity('${v.id}','${a.id}');" style="font-size:11px;color:#94a3b8;padding:2px 4px;" title="Delete"><i class="fa-solid fa-trash"></i></button>
+            </div>
+            <p style="margin:0 0 6px;font-size:14px;color:#1e293b;">${esc(a.summary)}</p>
+            ${(a.attendees||[]).length?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">${(a.attendees||[]).map(at=>`<span style="background:#f1f5f9;color:#475569;font-size:11px;padding:2px 8px;border-radius:9999px;">${esc(at)}</span>`).join('')}</div>`:''}
+            ${a.notes?`<p style="margin:6px 0 0;font-size:12px;color:#94a3b8;font-style:italic;border-top:1px solid #f8fafc;padding-top:6px;">${esc(a.notes)}</p>`:''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+function buildActivityForm(vendorId) {
+  const today = new Date().toISOString().split('T')[0];
+  return `
+  <form id="activity-form" onsubmit="saveActivity(event,'${vendorId}');" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;">
+    <p style="font-weight:600;font-size:14px;color:#334155;margin:0 0 12px;">Log Activity</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Type</label>
+        <select class="form-input" name="type" style="background:white;">${ACTIVITY_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
+      <div><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Date</label>
+        <input class="form-input" name="date" type="date" value="${today}"></div>
+      <div style="grid-column:span 2;"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Summary *</label>
+        <input class="form-input" name="summary" required placeholder="Brief description of the activity..."></div>
+      <div style="grid-column:span 2;"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Attendees <span style="color:#94a3b8;">(comma separated)</span></label>
+        <input class="form-input" name="attendees" placeholder="Name (Role), Name (Vendor)..."></div>
+      <div style="grid-column:span 2;"><label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Notes</label>
+        <textarea class="form-input" name="notes" rows="2" placeholder="Key takeaways, action items, follow-ups..." style="resize:none;"></textarea></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+      <button type="button" onclick="S.showActivityForm=false;render();" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:13px;font-family:'Inter',sans-serif;">Cancel</button>
+      <button type="submit" class="btn-primary" style="font-size:13px;padding:7px 16px;">Save</button>
+    </div>
+  </form>`;
+}
+
+function buildVendorModal() {
+  const v = S.modalVendor;
+  return `
+  <div class="modal-bg" onclick="if(event.target===this){S.modalOpen=false;render();}">
+    <div class="modal-box">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px 16px;border-bottom:1px solid #f1f5f9;flex-shrink:0;">
+        <h3 style="margin:0;font-size:17px;font-weight:700;color:#1e293b;">${v?'Edit Vendor':'Add Vendor'}</h3>
+        <button onclick="S.modalOpen=false;render();" class="btn-ghost" style="font-size:18px;">✕</button>
+      </div>
+      <div style="overflow-y:auto;padding:20px 24px;flex:1;">
+        <form id="vendor-form" onsubmit="saveVendorForm(event);">
+          <div style="display:flex;flex-direction:column;gap:16px;">
+            <div><label style="font-size:13px;font-weight:500;color:#374151;display:block;margin-bottom:6px;">Vendor Name *</label>
+              <input class="form-input" name="name" required placeholder="e.g. Harvey AI" value="${esc(v?.name||'')}"></div>
+            <div><label style="font-size:13px;font-weight:500;color:#374151;display:block;margin-bottom:6px;">Website</label>
+              <input class="form-input" name="website" type="url" placeholder="https://example.com" value="${esc(v?.website||'')}"></div>
+            <div><label style="font-size:13px;font-weight:500;color:#374151;display:block;margin-bottom:6px;">Description</label>
+              <textarea class="form-input" name="description" rows="3" placeholder="Brief description..." style="resize:none;">${esc(v?.description||'')}</textarea></div>
+            <div>
+              <label style="font-size:13px;font-weight:500;color:#374151;display:block;margin-bottom:8px;">Categories</label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                ${CATEGORIES.map(cat=>`
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" name="cat_${cat.replace(/\s/g,'_')}" value="${cat}" ${(v?.categories||[]).includes(cat)?'checked':''} style="width:15px;height:15px;accent-color:#4f46e5;">
+                    <span style="font-size:13px;color:#374151;">${cat}</span>
+                  </label>`).join('')}
+              </div>
+            </div>
+            <div><label style="font-size:13px;font-weight:500;color:#374151;display:block;margin-bottom:6px;">Data Sources <span style="color:#94a3b8;font-weight:400;">(comma separated)</span></label>
+              <input class="form-input" name="dataSources" placeholder="Case law, Statutes, Court filings..." value="${esc((v?.dataSources||[]).join(', '))}"></div>
+            <div><label style="font-size:13px;font-weight:500;color:#374151;display:block;margin-bottom:6px;">Integrations <span style="color:#94a3b8;font-weight:400;">(comma separated)</span></label>
+              <input class="form-input" name="integrations" placeholder="Salesforce, DocuSign, Microsoft 365..." value="${esc((v?.integrations||[]).join(', '))}"></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid #f1f5f9;">
+            <button type="button" onclick="S.modalOpen=false;render();" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:14px;font-family:'Inter',sans-serif;">Cancel</button>
+            <button type="submit" class="btn-primary">${v?'Save Changes':'Add Vendor'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>`;
+}
+
+function buildSettingsModal() {
+  return `
+  <div class="modal-bg" onclick="if(event.target===this){S.settingsOpen=false;render();}">
+    <div class="modal-box" style="max-width:420px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px 16px;border-bottom:1px solid #f1f5f9;">
+        <h3 style="margin:0;font-size:17px;font-weight:700;color:#1e293b;"><i class="fa-solid fa-gear" style="margin-right:8px;color:#6366f1;"></i>Settings</h3>
+        <button onclick="S.settingsOpen=false;render();" class="btn-ghost" style="font-size:18px;">✕</button>
+      </div>
+      <div style="padding:20px 24px;">
+        <label style="font-size:14px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Gemini API Key</label>
+        <p style="font-size:13px;color:#64748b;margin:0 0 10px;">Required to use the "Refresh with AI" feature. Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#6366f1;">aistudio.google.com</a>.</p>
+        <input class="form-input" id="api-key-input" type="password" placeholder="Paste your API key here..." value="${esc(S.apiKey)}" style="margin-bottom:12px;">
+        <div style="display:flex;gap:8px;">
+          <button onclick="saveApiKey();" class="btn-primary">Save Key</button>
+          ${S.apiKey?`<button onclick="S.apiKey='';localStorage.removeItem('${APIKEY_KEY}');document.getElementById('api-key-input').value='';alert('API key removed.');" class="btn-ghost" style="color:#dc2626;">Remove Key</button>`:''}
+        </div>
+        ${S.apiKey?`<p style="font-size:12px;color:#22c55e;margin:8px 0 0;"><i class="fa-solid fa-circle-check"></i> API key is saved.</p>`:''}
+        <div style="margin-top:24px;padding-top:20px;border-top:1px solid #f1f5f9;">
+          <p style="font-size:13px;font-weight:600;color:#374151;margin:0 0 8px;">Data</p>
+          <button onclick="if(confirm('Reset all vendor data to defaults? This cannot be undone.')){localStorage.removeItem('${STORAGE_KEY}');S.vendors=SEED;S.selectedId=null;S.settingsOpen=false;render();}" style="background:none;border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;font-size:13px;color:#64748b;cursor:pointer;font-family:'Inter',sans-serif;">Reset to Sample Data</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════
+// ACTIONS
+// ══════════════════════════════════════════════════════
+function selectVendor(id) {
+  S.selectedId = id;
+  S.activeTab = 'intelligence';
+  S.showContactForm = false;
+  S.editingContactId = null;
+  S.showActivityForm = false;
+  S.confirmDeleteId = null;
+  renderDetail();
+  // highlight selected in list
+  document.querySelectorAll('.vendor-card').forEach(el=>{
+    el.classList.remove('selected');
+    const style = el.style.cssText;
+    el.style.borderLeft = '4px solid transparent';
+    el.style.background = '';
+  });
+  const sel = document.querySelector(`.vendor-card[onclick*="'${id}'"]`);
+  if (sel) { sel.classList.add('selected'); sel.style.borderLeft='4px solid #4f46e5'; sel.style.background='#eef2ff'; }
+}
+
+function switchTab(tab) {
+  S.activeTab = tab;
+  S.showContactForm = false;
+  S.editingContactId = null;
+  S.showActivityForm = false;
+  renderDetail();
+}
+
+function openModal(vendorIdOrNull) {
+  S.modalVendor = vendorIdOrNull ? S.vendors.find(v=>v.id===vendorIdOrNull) : null;
+  S.modalOpen = true;
+  render();
+}
+
+function deleteVendor(id) {
+  S.vendors = S.vendors.filter(v=>v.id!==id);
+  if (S.selectedId===id) S.selectedId=null;
+  S.confirmDeleteId=null;
+  saveVendors();
+  render();
+}
+
+function deleteContact(vendorId, contactId) {
+  S.vendors = S.vendors.map(v=>v.id===vendorId?{...v,contacts:(v.contacts||[]).filter(c=>c.id!==contactId),updatedAt:nowISO()}:v);
+  saveVendors();
+  renderDetail();
+}
+
+function deleteActivity(vendorId, activityId) {
+  S.vendors = S.vendors.map(v=>v.id===vendorId?{...v,activities:(v.activities||[]).filter(a=>a.id!==activityId),updatedAt:nowISO()}:v);
+  saveVendors();
+  renderDetail();
+}
+
+function saveApiKey() {
+  const val = document.getElementById('api-key-input')?.value?.trim()||'';
+  S.apiKey = val;
+  if (val) localStorage.setItem(APIKEY_KEY, val);
+  else localStorage.removeItem(APIKEY_KEY);
+  render();
+}
+
+function saveVendorForm(event) {
+  event.preventDefault();
+  const form = event.target;
+  const fd = new FormData(form);
+  const categories = CATEGORIES.filter(cat=>fd.get('cat_'+cat.replace(/\s/g,'_')));
+  const splitTags = s => s.split(',').map(t=>t.trim()).filter(Boolean);
+  const now2 = nowISO();
+  const existing = S.modalVendor;
+  if (existing) {
+    S.vendors = S.vendors.map(v=>v.id===existing.id?{
+      ...v,
+      name: fd.get('name'),
+      website: fd.get('website'),
+      description: fd.get('description'),
+      categories,
+      dataSources: splitTags(fd.get('dataSources')||''),
+      integrations: splitTags(fd.get('integrations')||''),
+      updatedAt: now2,
+    }:v);
+  } else {
+    const newV = {
+      id: uid(),
+      name: fd.get('name'),
+      website: fd.get('website'),
+      description: fd.get('description'),
+      categories,
+      dataSources: splitTags(fd.get('dataSources')||''),
+      integrations: splitTags(fd.get('integrations')||''),
+      contacts: [],
+      activities: [],
+      intelligence: {latestRelease:'',aiModels:[],recentFeatures:[],lastFetched:null,sources:[]},
+      createdAt: now2,
+      updatedAt: now2,
+    };
+    S.vendors.push(newV);
+    S.selectedId = newV.id;
+  }
+  S.modalOpen = false;
+  saveVendors();
+  render();
+}
+
+function saveContact(event, vendorId, contactId) {
+  event.preventDefault();
+  const form = event.target;
+  const fd = new FormData(form);
+  const contact = {
+    id: contactId || uid(),
+    name: fd.get('name'),
+    title: fd.get('title'),
+    email: fd.get('email'),
+    phone: fd.get('phone'),
+    linkedIn: fd.get('linkedIn'),
+    notes: fd.get('notes'),
+  };
+  S.vendors = S.vendors.map(v=>{
+    if (v.id!==vendorId) return v;
+    const contacts = contactId
+      ? (v.contacts||[]).map(c=>c.id===contactId?contact:c)
+      : [...(v.contacts||[]), contact];
+    return {...v, contacts, updatedAt:nowISO()};
+  });
+  S.showContactForm = false;
+  S.editingContactId = null;
+  saveVendors();
+  renderDetail();
+}
+
+function saveActivity(event, vendorId) {
+  event.preventDefault();
+  const form = event.target;
+  const fd = new FormData(form);
+  const attendees = (fd.get('attendees')||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const activity = {
+    id: uid(),
+    type: fd.get('type'),
+    date: fd.get('date'),
+    summary: fd.get('summary'),
+    attendees,
+    notes: fd.get('notes'),
+  };
+  S.vendors = S.vendors.map(v=>{
+    if (v.id!==vendorId) return v;
+    return {...v, activities:[...(v.activities||[]), activity], updatedAt:nowISO()};
+  });
+  S.showActivityForm = false;
+  saveVendors();
+  renderDetail();
+}
+
+// ══════════════════════════════════════════════════════
+// RENDER
+// ══════════════════════════════════════════════════════
+function render() {
+  document.getElementById('app').innerHTML = buildApp();
+  renderList();
+}
+
+function renderList() {
+  const el = document.getElementById('vendor-list');
+  if (el) el.innerHTML = buildVendorList();
+  const label = document.getElementById('vendor-count-label');
+  const list = getFiltered();
+  if (label) label.textContent = `${list.length} of ${S.vendors.length} vendor${S.vendors.length!==1?'s':''}`;
+}
+
+function renderDetail() {
+  const el = document.getElementById('detail-panel');
+  const v = getSelected();
+  if (el) el.innerHTML = v ? buildDetail(v) : buildNoSelection();
+}
+
+// ══════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════
+loadData();
+render();
+</script>
+</body>
+</html>
